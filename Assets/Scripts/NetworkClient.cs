@@ -1,270 +1,116 @@
-﻿using System.Collections;
-using System.Collections.Generic;
-using UnityEngine;
+﻿using UnityEngine;
+using Unity.Collections;
+using Unity.Networking.Transport;
+using NetworkMessages;
+using NetworkObjects;
 using System;
 using System.Text;
-using System.Net.Sockets;
-using System.Net;
-using System.Linq;
-using UnityEngine.UIElements;
-using System.Linq.Expressions;
 
 public class NetworkClient : MonoBehaviour
 {
-    public UdpClient udp;
-    // Start is called before the first frame update
-    public GameState gameState;
-    public GameObject cubeRef;
+    public NetworkDriver m_Driver;
+    public NetworkConnection m_Connection;
+    public string serverIP;
+    public ushort serverPort;
+
 
     void Start()
     {
-        udp = new UdpClient();
-
-        // 52.203.158.53 - Server Ip
-        // localhost - Local Ip
-
-        udp.Connect("18.223.109.241", 12345);
-
-        Byte[] sendBytes = Encoding.ASCII.GetBytes("connect");
-
-        udp.Send(sendBytes, sendBytes.Length);
-
-        udp.BeginReceive(new AsyncCallback(OnReceived), udp);
-
-        float repeatTime = 1.0f / 200.0f;
-        InvokeRepeating("HeartBeat", repeatTime, repeatTime);
-
+        m_Driver = NetworkDriver.Create();
+        m_Connection = default(NetworkConnection);
+        var endpoint = NetworkEndPoint.Parse(serverIP, serverPort);
+        m_Connection = m_Driver.Connect(endpoint);
     }
 
-    void OnDestroy()
+    void SendToServer(string message)
     {
-        udp.Dispose();
+        var writer = m_Driver.BeginSend(m_Connection);
+        NativeArray<byte> bytes = new NativeArray<byte>(Encoding.ASCII.GetBytes(message), Allocator.Temp);
+        writer.WriteBytes(bytes);
+        m_Driver.EndSend(writer);
     }
 
-
-    public enum commands
+    void OnConnect()
     {
-        NEW_CLIENT,
-        UPDATE,
-        LOST_CLIENT,
-        UNIQUE_CLIENT_ID
-    };
+        Debug.Log("We are now connected to the server");
 
-    [Serializable]
-    public class Message
-    {
-        public commands cmd;
+        //// Example to send a handshake message:
+        // HandshakeMsg m = new HandshakeMsg();
+        // m.player.id = m_Connection.InternalId.ToString();
+        // SendToServer(JsonUtility.ToJson(m));
     }
 
-    [Serializable]
-    public class Player
+    void OnData(DataStreamReader stream)
     {
-        [Serializable]
-        public struct receivedColor
+        NativeArray<byte> bytes = new NativeArray<byte>(stream.Length, Allocator.Temp);
+        stream.ReadBytes(bytes);
+        string recMsg = Encoding.ASCII.GetString(bytes.ToArray());
+        NetworkHeader header = JsonUtility.FromJson<NetworkHeader>(recMsg);
+
+        switch (header.cmd)
         {
-            public float R;
-            public float G;
-            public float B;
-        }
-
-        public receivedColor color;
-        public Vector3 position;
-        public string id;
-        public GameObject cube = null;
-    }
-
-    [Serializable]
-    public class NewPlayer
-    {
-        public Player newPlayer;
-        public Player[] players;
-    }
-
-    [Serializable]
-    public class DiePlayer
-    {
-        public Player lostPlayer;
-    }
-
-    [Serializable]
-    public class GameState
-    {
-        public Player[] players;
-    }
-
-    public struct playerUniqueID
-    {
-        public string uniqueID;
-    }
-
-    public struct PlayerData
-    {
-        public Vector3 playerLocation;
-        public string heartbeat;
-    }
-
-    public playerUniqueID uniqueID;
-
-    public PlayerData playerData;
-    public Message latestMessage;
-    public GameState lastestGameState;
-    public NewPlayer lastestNewPlayer;
-    public DiePlayer lastestLostPlayer;
-
-    public List<Player> PlayerList;
-
-    public bool newPlayerSpawned = false;
-
-    void OnReceived(IAsyncResult result)
-    {
-        // this is what had been passed into BeginReceive as the second parameter:
-        UdpClient socket = result.AsyncState as UdpClient;
-
-        // points towards whoever had sent the message:
-        IPEndPoint source = new IPEndPoint(0, 0);
-
-        // get the actual message and fill out the source:
-        byte[] message = socket.EndReceive(result, ref source);
-
-        // do what you'd like with `message` here:
-        string returnData = Encoding.ASCII.GetString(message);
-        Debug.Log("Got this: " + returnData);
-
-        latestMessage = JsonUtility.FromJson<Message>(returnData);
-        try
-        {
-            switch (latestMessage.cmd)
-            {
-                case commands.NEW_CLIENT:
-                    lastestNewPlayer = JsonUtility.FromJson<NewPlayer>(returnData);
-                    newPlayerSpawned = true;
-                    break;
-
-                case commands.UPDATE:
-                    lastestGameState = JsonUtility.FromJson<GameState>(returnData);
-                    break;
-
-                case commands.LOST_CLIENT:
-                    lastestLostPlayer = JsonUtility.FromJson<DiePlayer>(returnData);
-                    break;
-
-                case commands.UNIQUE_CLIENT_ID:
-                    uniqueID = JsonUtility.FromJson<playerUniqueID>(returnData);
-                    break;
-
-                default:
-                    Debug.Log("Error");
-                    break;
-            }
-        }
-        catch (Exception e)
-        {
-            Debug.Log(e.ToString());
-        }
-
-        // schedule the next receive operation once reading is done:
-        socket.BeginReceive(new AsyncCallback(OnReceived), socket);
-    }
-
-    void SpawnPlayers()
-    {
-        if (newPlayerSpawned)
-        {
-            // Debug.Log(lastestNewPlayer.newPlayer.id);
-            if (lastestNewPlayer.players != null)
-            {
-                foreach (Player player in lastestNewPlayer.players)
-                {
-                    PlayerList.Add(player);
-                    PlayerList.Last().cube = Instantiate(cubeRef);
-                    PlayerList.Last().cube.transform.position = player.position;
-                    PlayerList.Last().cube.GetComponent<Renderer>().material.SetColor("_Color", new Color(player.color.R, player.color.G, player.color.B));
-                    //PlayerList.Last().cube.transform.position = player.position;
-                }
-            }
-
-            PlayerList.Add(lastestNewPlayer.newPlayer);
-            PlayerList.Last().cube = Instantiate(cubeRef);
-            PlayerList.Last().cube.GetComponent<PlayerCube>().netWorkManRef = this;
-            PlayerList.Last().cube.GetComponent<Renderer>().material.SetColor("_Color", new Color(lastestNewPlayer.newPlayer.color.R, lastestNewPlayer.newPlayer.color.G, lastestNewPlayer.newPlayer.color.B));
-
-            playerData.playerLocation = new Vector3(0.0f, 0.0f, 0.0f);
-            newPlayerSpawned = false;
+            case Commands.HANDSHAKE:
+                HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
+                Debug.Log("Handshake message received!");
+                break;
+            case Commands.PLAYER_UPDATE:
+                PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
+                Debug.Log("Player update message received!");
+                break;
+            case Commands.SERVER_UPDATE:
+                ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
+                Debug.Log("Server update message received!");
+                break;
+            default:
+                Debug.Log("Unrecognized message received!");
+                break;
         }
     }
 
-    void UpdatePlayers()
+    void Disconnect()
     {
-        
-
-        // Loop though players to find controlling Client
-        foreach (Player player in PlayerList)
-        {
-            if (player.id == uniqueID.uniqueID)
-            {
-                // Loop through the servers players to check for our player, and get the ref
-                foreach (Player serverPlayer in lastestGameState.players)
-                {
-                    if (serverPlayer.id == player.id)
-                    {
-                        // set our player ref inside our controller
-                        player.cube.GetComponent<PlayerCube>().playerRef = serverPlayer;
-                    }
-                }
-            }
-
-            // Update other Players
-            else
-            {
-                foreach (Player serverPlayer in lastestGameState.players)
-                {
-                    if (serverPlayer.id == player.id)
-                    {
-                        player.cube.transform.position = serverPlayer.position;
-                    }
-                }
-            }
-        }
-
-        // Inside Player Cube Script
+        m_Connection.Disconnect(m_Driver);
+        m_Connection = default(NetworkConnection);
     }
 
-    void DestroyPlayers()
+    void OnDisconnect()
     {
-        if (lastestLostPlayer.lostPlayer != null)
-        {
-            foreach (Player player in PlayerList)
-            {
-                if (player.Equals(lastestLostPlayer.lostPlayer))
-                {
-                    PlayerList.Remove(player);
-                }
-            }
-        }
-    }
-    void HeartBeat()
-    {
-        playerData.playerLocation = new Vector3(0.0f, 0.0f, 0.0f);
-
-        foreach (Player player in PlayerList)
-        {
-            if (player.id == uniqueID.uniqueID)
-            {
-                playerData.playerLocation = player.cube.transform.position;
-                continue;
-            }
-        }
-
-        playerData.heartbeat = "heartbeat";
-
-        Byte[] sendBytes = Encoding.ASCII.GetBytes(JsonUtility.ToJson(playerData));
-        udp.Send(sendBytes, sendBytes.Length);
+        Debug.Log("Client got disconnected from server");
+        m_Connection = default(NetworkConnection);
     }
 
+    public void OnDestroy()
+    {
+        m_Driver.Dispose();
+    }
     void Update()
     {
-        SpawnPlayers();
-        UpdatePlayers();
-        DestroyPlayers();
+        m_Driver.ScheduleUpdate().Complete();
+
+        if (!m_Connection.IsCreated)
+        {
+            return;
+        }
+
+        DataStreamReader stream;
+        NetworkEvent.Type cmd;
+        cmd = m_Connection.PopEvent(m_Driver, out stream);
+        while (cmd != NetworkEvent.Type.Empty)
+        {
+            if (cmd == NetworkEvent.Type.Connect)
+            {
+                OnConnect();
+            }
+            else if (cmd == NetworkEvent.Type.Data)
+            {
+                OnData(stream);
+            }
+            else if (cmd == NetworkEvent.Type.Disconnect)
+            {
+                OnDisconnect();
+            }
+
+            cmd = m_Connection.PopEvent(m_Driver, out stream);
+        }
     }
 }
