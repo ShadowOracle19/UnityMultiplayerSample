@@ -5,6 +5,7 @@ using NetworkMessages;
 using NetworkObjects;
 using System;
 using System.Text;
+using System.Collections;
 
 public class NetworkClient : MonoBehaviour
 {
@@ -12,7 +13,7 @@ public class NetworkClient : MonoBehaviour
     public NetworkConnection m_Connection;
     public string serverIP;
     public ushort serverPort;
-
+    public GameObject playerPrefab;
 
     void Start()
     {
@@ -33,11 +34,24 @@ public class NetworkClient : MonoBehaviour
     void OnConnect()
     {
         Debug.Log("We are now connected to the server");
-
+        StartCoroutine(SendRepeatedHandshake());
+        GameObject player = (GameObject)Instantiate(playerPrefab, Vector3.zero, Quaternion.identity);
         //// Example to send a handshake message:
         // HandshakeMsg m = new HandshakeMsg();
         // m.player.id = m_Connection.InternalId.ToString();
         // SendToServer(JsonUtility.ToJson(m));
+    }
+
+    IEnumerator SendRepeatedHandshake()
+    {
+        while(true)
+        {
+            yield return new WaitForSeconds(2);
+            Debug.Log("Sending handshake");
+            HandshakeMsg m = new HandshakeMsg();
+            m.player.id = m_Connection.InternalId.ToString();
+            SendToServer(JsonUtility.ToJson(m));
+        }
     }
 
     void OnData(DataStreamReader stream)
@@ -89,6 +103,7 @@ public class NetworkClient : MonoBehaviour
 
         if (!m_Connection.IsCreated)
         {
+            Debug.Log("Something went wrong during connect");
             return;
         }
 
@@ -100,10 +115,12 @@ public class NetworkClient : MonoBehaviour
             if (cmd == NetworkEvent.Type.Connect)
             {
                 OnConnect();
+                
             }
             else if (cmd == NetworkEvent.Type.Data)
             {
                 OnData(stream);
+
             }
             else if (cmd == NetworkEvent.Type.Disconnect)
             {

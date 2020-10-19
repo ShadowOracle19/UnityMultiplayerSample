@@ -5,10 +5,12 @@ using Unity.Networking.Transport;
 using NetworkMessages;
 using System;
 using System.Text;
+using System.Collections;
 
 public class NetworkServer : MonoBehaviour
 {
     public NetworkDriver m_Driver;
+    public string serverIP;
     public ushort serverPort;
     private NativeList<NetworkConnection> m_Connections;
 
@@ -21,11 +23,33 @@ public class NetworkServer : MonoBehaviour
             Debug.Log("Failed to bind to port " + serverPort);
         else
             m_Driver.Listen();
+            
+            
 
         m_Connections = new NativeList<NetworkConnection>(16, Allocator.Persistent);
     }
 
-    void SendToClient(string message, NetworkConnection c){
+    IEnumerator SendHandShakeToAllClient()
+    {
+        while (true)
+        {
+            for (int i = 0; i < m_Connections.Length; i++)
+            {
+                if(!m_Connections[i].IsCreated)
+                {
+                    continue;
+                }
+                //Example to send a handshake message
+                HandshakeMsg m = new HandshakeMsg();
+                m.player.id = m_Connections[i].InternalId.ToString();
+                SendToClient(JsonUtility.ToJson(m), m_Connections[i]);
+
+            }
+            yield return new WaitForSeconds(2);
+        }
+    }
+    
+void SendToClient(string message, NetworkConnection c){
         var writer = m_Driver.BeginSend(NetworkPipeline.Null, c);
         NativeArray<byte> bytes = new NativeArray<byte>(Encoding.ASCII.GetBytes(message),Allocator.Temp);
         writer.WriteBytes(bytes);
@@ -39,6 +63,10 @@ public class NetworkServer : MonoBehaviour
 
     void OnConnect(NetworkConnection c){
         m_Connections.Add(c);
+        var newPlayerId = c.InternalId;
+        var connMsg = new InitializeConnectingMsg();
+        connMsg.yourId = newPlayerId.ToString();
+        SendToClient(newPlayerId.ToString(), c);
         Debug.Log("Accepted a connection");
 
         //// Example to send a handshake message:
