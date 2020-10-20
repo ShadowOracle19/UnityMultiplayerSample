@@ -106,7 +106,7 @@ public class NetworkServer : MonoBehaviour
 
         newPlayer.id = c.InternalId.ToString();
         newPlayer.cubeColor = UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f);
-        newPlayer.cubPos = new Vector3(UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(0, 10));
+        newPlayer.cubePos = new Vector3(UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(0, 10));
 
         //Send the current players (via the connections list) the new player's info
         for (int i = 0; i < m_Connections.Length; i++)
@@ -165,7 +165,7 @@ public class NetworkServer : MonoBehaviour
         if (playerOnList != null)
         {
             playerOnList.cubeColor = player.cubeColor;
-            playerOnList.cubPos = player.cubPos;
+            playerOnList.cubePos = player.cubePos;
         }
         else
         {

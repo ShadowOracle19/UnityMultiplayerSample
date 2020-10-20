@@ -67,7 +67,7 @@ namespace NetworkObjects
     [System.Serializable]
     public class NetworkPlayer : NetworkObject{
         public Color cubeColor;
-        public Vector3 cubPos;
+        public Vector3 cubePos;
 
         public NetworkPlayer(){
             cubeColor = new Color();

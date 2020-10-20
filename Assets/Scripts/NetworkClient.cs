@@ -79,7 +79,7 @@ public class NetworkClient : MonoBehaviour
                 Debug.Log("Sending client info to server");
                 m.player.id = myID;
                 m.player.cubeColor = playerObject.GetComponent<MeshRenderer>().material.color;
-                m.player.cubPos = playerObject.transform.position;
+                m.player.cubePos = playerObject.transform.position;
 
                 SendToServer(JsonUtility.ToJson(m));
             }
@@ -145,7 +145,7 @@ public class NetworkClient : MonoBehaviour
     private void CreatePlayer(NetworkObjects.NetworkPlayer newPlayer)
     {
         // Create the newPlayer
-        GameObject newPlayerObject = Instantiate(playerPrefab, newPlayer.cubPos, Quaternion.identity);
+        GameObject newPlayerObject = Instantiate(playerPrefab, newPlayer.cubePos, Quaternion.identity);
         // Set their ID tag
         newPlayerObject.GetComponentInChildren<TMP_Text>().text = newPlayer.id;
         newPlayerObject.GetComponent<MeshRenderer>().material.color = new Color(newPlayer.cubeColor.r, newPlayer.cubeColor.b, newPlayer.cubeColor.g);
@@ -171,7 +171,7 @@ public class NetworkClient : MonoBehaviour
             {
                 // Set the position and color
                 //playerObject.GetComponent<MeshRenderer>().material.color = new Color(player.cubeColor.r, player.cubeColor.b, player.cubeColor.g);
-                playerObject.transform.position = player.cubPos;
+                playerObject.transform.position = player.cubePos;
             }
 
         }
