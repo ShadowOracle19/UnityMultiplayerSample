@@ -16,17 +16,16 @@ public class NetworkServer : MonoBehaviour
 
     private NetworkObjects.NetworkPlayer getPlayerFromList(string id)
     {
-        foreach(var player in m_PlayerList)
+        foreach (var player in m_PlayerList)
         {
-            if(player.id == id)
+            if (player.id == id)
             {
                 return player;
             }
         }
         return null;
     }
-
-    void Start ()
+    void Start()
     {
         m_Driver = NetworkDriver.Create();
         var endpoint = NetworkEndPoint.AnyIpv4;
@@ -35,25 +34,24 @@ public class NetworkServer : MonoBehaviour
             Debug.Log("Failed to bind to port " + serverPort);
         else
             m_Driver.Listen();
+
         m_Connections = new NativeList<NetworkConnection>(16, Allocator.Persistent);
         m_PlayerList = new List<NetworkObjects.NetworkPlayer>();
 
-        StartCoroutine(SendHandShakeToAllClient());
+        StartCoroutine(SendHandshakeToAllClients());
         StartCoroutine(SendUpdateToAllClients());
 
     }
 
-    IEnumerator SendHandShakeToAllClient()
+    IEnumerator SendHandshakeToAllClients()
     {
         while (true)
         {
             for (int i = 0; i < m_Connections.Length; i++)
             {
-                if(!m_Connections[i].IsCreated)
-                {
+                if (!m_Connections[i].IsCreated)
                     continue;
-                }
-                //Example to send a handshake message
+                // Send each client a handshake
                 HandshakeMsg m = new HandshakeMsg();
                 m.player.id = m_Connections[i].InternalId.ToString();
                 SendToClient(JsonUtility.ToJson(m), m_Connections[i]);
@@ -80,9 +78,11 @@ public class NetworkServer : MonoBehaviour
         }
     }
 
-    void SendToClient(string message, NetworkConnection c){
+
+    void SendToClient(string message, NetworkConnection c)
+    {
         var writer = m_Driver.BeginSend(NetworkPipeline.Null, c);
-        NativeArray<byte> bytes = new NativeArray<byte>(Encoding.ASCII.GetBytes(message),Allocator.Temp);
+        NativeArray<byte> bytes = new NativeArray<byte>(Encoding.ASCII.GetBytes(message), Allocator.Temp);
         writer.WriteBytes(bytes);
         m_Driver.EndSend(writer);
     }
@@ -92,23 +92,24 @@ public class NetworkServer : MonoBehaviour
         m_Connections.Dispose();
     }
 
-    void OnConnect(NetworkConnection c){
+    void OnConnect(NetworkConnection c)
+    {
         m_Connections.Add(c);
         Debug.Log($"Accepted a connection, new id: {c.InternalId}");
 
-        //example to send a handshake message
+        // Example to send a handshake message:
         HandshakeMsg m = new HandshakeMsg();
         m.player.id = c.InternalId.ToString();
         SendToClient(JsonUtility.ToJson(m), c);
 
-        // create the player object info here and send it to everyone
+        // Create the player's object info here and send it to everyone
         NetworkObjects.NetworkPlayer newPlayer = new NetworkObjects.NetworkPlayer();
 
         newPlayer.id = c.InternalId.ToString();
         newPlayer.cubeColor = UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f);
         newPlayer.cubePos = new Vector3(UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(0, 10));
 
-        //Send the current players (via the connections list) the new player's info
+        // Send the current players (via the connections list) the new player's info
         for (int i = 0; i < m_Connections.Length; i++)
         {
             if (m_Connections[i] != c)
@@ -120,10 +121,9 @@ public class NetworkServer : MonoBehaviour
             }
         }
 
-        //The add the new player to the list
+        // Then add the new player to the list
         m_PlayerList.Add(newPlayer);
-
-        //finally send the new player all of the players to spawn(including itself)
+        // Finally send the new player all of the players to spawn (including itself)
         foreach (var player in m_PlayerList)
         {
             PlayerUpdateMsg m3 = new PlayerUpdateMsg();
@@ -131,31 +131,34 @@ public class NetworkServer : MonoBehaviour
             m3.player = player;
             SendToClient(JsonUtility.ToJson(m3), c);
             Debug.Log($"Send player join message to client id: { c.InternalId} with the command {m3.cmd}");
-        }        
+        }
     }
 
-    void OnData(DataStreamReader stream, int i){
-        NativeArray<byte> bytes = new NativeArray<byte>(stream.Length,Allocator.Temp);
+    void OnData(DataStreamReader stream, int i)
+    {
+        NativeArray<byte> bytes = new NativeArray<byte>(stream.Length, Allocator.Temp);
         stream.ReadBytes(bytes);
         string recMsg = Encoding.ASCII.GetString(bytes.ToArray());
         NetworkHeader header = JsonUtility.FromJson<NetworkHeader>(recMsg);
 
-        switch(header.cmd){
+        switch (header.cmd)
+        {
             case Commands.HANDSHAKE:
                 HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
                 Debug.Log("Handshake message received!");
-            break;
+                break;
             case Commands.PLAYER_UPDATE:
                 PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
                 Debug.Log("Player update message received!");
-            break;
+                UpdatePlayerInfo(puMsg.player);
+                break;
             case Commands.SERVER_UPDATE:
                 ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
                 Debug.Log("Server update message received!");
-            break;
+                break;
             default:
                 Debug.Log("SERVER ERROR: Unrecognized message received!");
-            break;
+                break;
         }
     }
 
@@ -173,11 +176,12 @@ public class NetworkServer : MonoBehaviour
         }
     }
 
-    void OnDisconnect(int i){
+    void OnDisconnect(int i)
+    {
         Debug.Log("Client disconnected from server");
         m_Connections[i] = default(NetworkConnection);
 
-        //send the disconnect message to all remaining clients
+        // Send the disconnect message to all remaining clients
         PlayerUpdateMsg m = new PlayerUpdateMsg();
         m.cmd = Commands.PLAYER_LEFT;
         m.player = getPlayerFromList(m_Connections[i].InternalId.ToString());
@@ -192,7 +196,7 @@ public class NetworkServer : MonoBehaviour
         }
     }
 
-    void Update ()
+    void Update()
     {
         m_Driver.ScheduleUpdate().Complete();
 
@@ -209,8 +213,8 @@ public class NetworkServer : MonoBehaviour
 
         // AcceptNewConnections
         NetworkConnection c = m_Driver.Accept();
-        while (c  != default(NetworkConnection))
-        {            
+        while (c != default(NetworkConnection))
+        {
             OnConnect(c);
 
             // Check if there is another new connection
@@ -223,7 +227,7 @@ public class NetworkServer : MonoBehaviour
         for (int i = 0; i < m_Connections.Length; i++)
         {
             Assert.IsTrue(m_Connections[i].IsCreated);
-            
+
             NetworkEvent.Type cmd;
             cmd = m_Driver.PopEventForConnection(m_Connections[i], out stream);
             while (cmd != NetworkEvent.Type.Empty)
