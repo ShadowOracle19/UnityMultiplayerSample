@@ -3,16 +3,28 @@ using UnityEngine.Assertions;
 using Unity.Collections;
 using Unity.Networking.Transport;
 using NetworkMessages;
-using System;
 using System.Text;
 using System.Collections;
+using System.Collections.Generic;
 
 public class NetworkServer : MonoBehaviour
 {
     public NetworkDriver m_Driver;
-    public string serverIP;
     public ushort serverPort;
     private NativeList<NetworkConnection> m_Connections;
+    private List<NetworkObjects.NetworkPlayer> m_PlayerList;
+
+    private NetworkObjects.NetworkPlayer getPlayerFromList(string id)
+    {
+        foreach(var player in m_PlayerList)
+        {
+            if(player.id == id)
+            {
+                return player;
+            }
+        }
+        return null;
+    }
 
     void Start ()
     {
@@ -23,10 +35,12 @@ public class NetworkServer : MonoBehaviour
             Debug.Log("Failed to bind to port " + serverPort);
         else
             m_Driver.Listen();
-            
-            
-
         m_Connections = new NativeList<NetworkConnection>(16, Allocator.Persistent);
+        m_PlayerList = new List<NetworkObjects.NetworkPlayer>();
+
+        StartCoroutine(SendHandShakeToAllClient());
+        StartCoroutine(SendUpdateToAllClients());
+
     }
 
     IEnumerator SendHandShakeToAllClient()
@@ -48,8 +62,25 @@ public class NetworkServer : MonoBehaviour
             yield return new WaitForSeconds(2);
         }
     }
-    
-void SendToClient(string message, NetworkConnection c){
+
+    IEnumerator SendUpdateToAllClients()
+    {
+        while (true)
+        {
+            ServerUpdateMsg m = new ServerUpdateMsg();
+            m.players = m_PlayerList;
+            foreach (var connection in m_Connections)
+            {
+                if (!connection.IsCreated)
+                    continue;
+                // Send each client a server update
+                SendToClient(JsonUtility.ToJson(m), connection);
+            }
+            yield return new WaitForSeconds(0.03f);
+        }
+    }
+
+    void SendToClient(string message, NetworkConnection c){
         var writer = m_Driver.BeginSend(NetworkPipeline.Null, c);
         NativeArray<byte> bytes = new NativeArray<byte>(Encoding.ASCII.GetBytes(message),Allocator.Temp);
         writer.WriteBytes(bytes);
@@ -63,16 +94,44 @@ void SendToClient(string message, NetworkConnection c){
 
     void OnConnect(NetworkConnection c){
         m_Connections.Add(c);
-        var newPlayerId = c.InternalId;
-        var connMsg = new InitializeConnectingMsg();
-        connMsg.yourId = newPlayerId.ToString();
-        SendToClient(newPlayerId.ToString(), c);
-        Debug.Log("Accepted a connection");
+        Debug.Log($"Accepted a connection, new id: {c.InternalId}");
 
-        //// Example to send a handshake message:
-        // HandshakeMsg m = new HandshakeMsg();
-        // m.player.id = c.InternalId.ToString();
-        // SendToClient(JsonUtility.ToJson(m),c);        
+        //example to send a handshake message
+        HandshakeMsg m = new HandshakeMsg();
+        m.player.id = c.InternalId.ToString();
+        SendToClient(JsonUtility.ToJson(m), c);
+
+        // create the player object info here and send it to everyone
+        NetworkObjects.NetworkPlayer newPlayer = new NetworkObjects.NetworkPlayer();
+
+        newPlayer.id = c.InternalId.ToString();
+        newPlayer.cubeColor = UnityEngine.Random.ColorHSV(0f, 1f, 1f, 1f, 0.5f, 1f);
+        newPlayer.cubPos = new Vector3(UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(-10, 10), UnityEngine.Random.Range(0, 10));
+
+        //Send the current players (via the connections list) the new player's info
+        for (int i = 0; i < m_Connections.Length; i++)
+        {
+            if (m_Connections[i] != c)
+            {
+                PlayerUpdateMsg m2 = new PlayerUpdateMsg();
+                m2.cmd = Commands.PLAYER_JOINED;
+                m2.player = newPlayer;
+                SendToClient(JsonUtility.ToJson(m2), m_Connections[i]);
+            }
+        }
+
+        //The add the new player to the list
+        m_PlayerList.Add(newPlayer);
+
+        //finally send the new player all of the players to spawn(including itself)
+        foreach (var player in m_PlayerList)
+        {
+            PlayerUpdateMsg m3 = new PlayerUpdateMsg();
+            m3.cmd = Commands.PLAYER_JOINED;
+            m3.player = player;
+            SendToClient(JsonUtility.ToJson(m3), c);
+            Debug.Log($"Send player join message to client id: { c.InternalId} with the command {m3.cmd}");
+        }        
     }
 
     void OnData(DataStreamReader stream, int i){
@@ -83,26 +142,54 @@ void SendToClient(string message, NetworkConnection c){
 
         switch(header.cmd){
             case Commands.HANDSHAKE:
-            HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
-            Debug.Log("Handshake message received!");
+                HandshakeMsg hsMsg = JsonUtility.FromJson<HandshakeMsg>(recMsg);
+                Debug.Log("Handshake message received!");
             break;
             case Commands.PLAYER_UPDATE:
-            PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
-            Debug.Log("Player update message received!");
+                PlayerUpdateMsg puMsg = JsonUtility.FromJson<PlayerUpdateMsg>(recMsg);
+                Debug.Log("Player update message received!");
             break;
             case Commands.SERVER_UPDATE:
-            ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
-            Debug.Log("Server update message received!");
+                ServerUpdateMsg suMsg = JsonUtility.FromJson<ServerUpdateMsg>(recMsg);
+                Debug.Log("Server update message received!");
             break;
             default:
-            Debug.Log("SERVER ERROR: Unrecognized message received!");
+                Debug.Log("SERVER ERROR: Unrecognized message received!");
             break;
+        }
+    }
+
+    private void UpdatePlayerInfo(NetworkObjects.NetworkPlayer player)
+    {
+        var playerOnList = getPlayerFromList(player.id);
+        if (playerOnList != null)
+        {
+            playerOnList.cubeColor = player.cubeColor;
+            playerOnList.cubPos = player.cubPos;
+        }
+        else
+        {
+            Debug.LogError("Tired to grab unknown player info, ID: " + player.id);
         }
     }
 
     void OnDisconnect(int i){
         Debug.Log("Client disconnected from server");
         m_Connections[i] = default(NetworkConnection);
+
+        //send the disconnect message to all remaining clients
+        PlayerUpdateMsg m = new PlayerUpdateMsg();
+        m.cmd = Commands.PLAYER_LEFT;
+        m.player = getPlayerFromList(m_Connections[i].InternalId.ToString());
+
+        foreach (var client in m_Connections)
+        {
+            if (client != m_Connections[i])
+            {
+                SendToClient(JsonUtility.ToJson(m), client);
+                Debug.Log($"Send player left message to client id: { client.InternalId} with the command {m.cmd}");
+            }
+        }
     }
 
     void Update ()

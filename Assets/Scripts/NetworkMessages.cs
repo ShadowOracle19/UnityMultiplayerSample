@@ -8,7 +8,9 @@ namespace NetworkMessages
         PLAYER_UPDATE,
         SERVER_UPDATE,
         HANDSHAKE,
-        PLAYER_INPUT
+        PLAYER_INPUT,
+        PLAYER_JOINED,
+        PLAYER_LEFT
     }
 
     [System.Serializable]
@@ -53,7 +55,7 @@ namespace NetworkMessages
             cmd = Commands.SERVER_UPDATE;
             players = new List<NetworkObjects.NetworkPlayer>();
         }
-    }
+    } 
 } 
 
 namespace NetworkObjects
